@@ -6,6 +6,13 @@ from dataset import category_dict_sequential, category_dict_sequential_inv
 import numpy as np
 from collections import OrderedDict
 import os
+from future.utils import iteritems
+
+def convert_weights(state_dict):
+    tmp_weights = OrderedDict()
+    for name, params in iteritems(state_dict):
+        tmp_weights[name.replace('module.', '')] = params
+    return tmp_weights
 
 class Net(nn.Module):
     def __init__(self):
@@ -19,7 +26,8 @@ class Net(nn.Module):
         self.layer2 = resnet.layer2
         self.layer3 = resnet.layer3
         self.layer4 = resnet.layer4
-        self.avgpool = resnet.avgpool
+        # self.avgpool = resnet.avgpool
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(2048, 80)
 
     def forward(self, x):
@@ -96,7 +104,8 @@ class Decoder(nn.Module):
         encoder_out = encoder_out[sort_ind]
 
         fc_out = fc_out[sort_ind]
-        label_lengths = (label_lengths - 1).tolist()
+        # label_lengths = (label_lengths - 1).tolist()
+        label_lengths = label_lengths - 1
 
         encoder_out = encoder_out.view(batch_size, -1, self.encoder_dim)
 
@@ -105,13 +114,17 @@ class Decoder(nn.Module):
             [category_dict_sequential['<start>']] * batch_size).to('cuda')
         embeddings = self.embedding(start_word_idx)
 
-        predictions = torch.zeros(batch_size, max(label_lengths),
-                                  self.number_classes + 1).to('cuda')
+        # predictions = torch.zeros(batch_size, max(label_lengths),
+        #                           self.number_classes + 1).to('cuda')
+        # multi-gpu support
+        predictions = torch.zeros(batch_size, 20, self.number_classes + 1).to('cuda')
 
         h = self.init_h(fc_out)
         c = self.init_c(fc_out)
 
-        for t in range(max(label_lengths)):
+        # for t in range(max(label_lengths)):
+        # multi-gpu support
+        for t in range(20):
             attention_weighted_encoding, _ = self.attention(encoder_out, h)
             gate = self.sigmoid(self.f_beta(h))
             attention_weighted_encoding = gate * attention_weighted_encoding
@@ -130,7 +143,7 @@ class Encoder(nn.Module):
         self.net = Net()
         if encoder_weights:
             print "ENCODER PRETRAINED WEIGHTS"
-            self.net.load_state_dict(torch.load(encoder_weights))
+            self.net.load_state_dict(convert_weights(torch.load(encoder_weights)))
         else:
             print "ENCODER IMAGENET WEIGHTS"
 

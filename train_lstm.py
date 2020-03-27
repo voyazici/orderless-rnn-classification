@@ -20,6 +20,7 @@ from tensorboardX import SummaryWriter
 import sys
 import datetime
 from munkres import Munkres
+from model import convert_weights
 
 m = Munkres()
 
@@ -270,14 +271,14 @@ if __name__ == "__main__":
         checkpoint = torch.load(snapshot,  map_location=lambda storage, loc: storage)
         if (train_from_scratch and 'decoder_swa_state_dict' in checkpoint) or (test_model and 'decoder_swa_state_dict' in checkpoint):
             print "Inputting the swa weights."
-            decoder.load_state_dict(checkpoint['decoder_swa_state_dict'])
+            decoder.load_state_dict(convert_weights(checkpoint['decoder_swa_state_dict']))
             if 'encoder_swa_state_dict' in checkpoint:
-                encoder.load_state_dict(checkpoint['encoder_swa_state_dict'])
+                encoder.load_state_dict(convert_weights(checkpoint['encoder_swa_state_dict']))
             else:
-                encoder.load_state_dict(checkpoint['encoder_state_dict'])
+                encoder.load_state_dict(convert_weights(checkpoint['encoder_state_dict']))
         else:
-            encoder.load_state_dict(checkpoint['encoder_state_dict'])
-            decoder.load_state_dict(checkpoint['decoder_state_dict'])
+            encoder.load_state_dict(convert_weights(checkpoint['encoder_state_dict']))
+            decoder.load_state_dict(convert_weights(checkpoint['decoder_state_dict']))
         if args.test_model == False and args.train_from_scratch == False:
             resume = checkpoint['resume'] + 1
             highest_f1 = checkpoint['f1']
@@ -307,9 +308,9 @@ if __name__ == "__main__":
         encoder_swa = Encoder().to('cuda')
         print "Encoder and decoder learning rates will be overwritten"
         if checkpoint:
-            decoder_swa.load_state_dict(checkpoint['decoder_swa_state_dict'])
+            decoder_swa.load_state_dict(convert_weights(checkpoint['decoder_swa_state_dict']))
             if 'encoder_swa_state_dict' in checkpoint:
-                encoder_swa.load_state_dict(checkpoint['encoder_swa_state_dict'])
+                encoder_swa.load_state_dict(convert_weights(checkpoint['encoder_swa_state_dict']))
             else:
                 raise ValueError("No encoder swa state dict")
 
@@ -317,11 +318,13 @@ if __name__ == "__main__":
                 iterations = checkpoint['iterations']
                 number_swa_models = iterations / (swa_params['cycle_length'] + 1)
                 print "# of SWA models", number_swa_models
-                # iterations = 3
+
                 swa = SWA(number_swa_models=number_swa_models)
                 scheduler_decoder.curr_iter = iterations
                 if finetune_encoder:
                     scheduler_encoder.curr_iter = iterations
+                print scheduler_decoder.get_lr()[0]
+                print "SWA decoder curr lr", scheduler_decoder.print_lr()[0]
             else:
                 swa = SWA(number_swa_models=0)
                 print "# of SWA models 0"
@@ -358,6 +361,13 @@ if __name__ == "__main__":
                                 drop_last=False,
                                 collate_fn=my_collate)
 
+    if torch.cuda.device_count() > 1:
+        encoder = nn.DataParallel(encoder)
+        decoder = nn.DataParallel(decoder)
+        if swa_params:
+            encoder_swa = nn.DataParallel(encoder_swa)
+            decoder_swa = nn.DataParallel(decoder_swa)
+
     best_f1 = 0.0
     for epoch in range(resume, args.epochs):
         training = True
@@ -390,6 +400,12 @@ if __name__ == "__main__":
                         encoder_swa(images)
                 scores, labels_sorted, label_lengths_sorted = decoder(
                     encoder_out, fc_out, labels, label_lengths)
+
+                # multi-gpu support
+                label_lengths_sorted, sort_ind = label_lengths_sorted.sort(dim=0, descending=True)
+                labels_sorted = labels_sorted[sort_ind]
+                scores = scores[sort_ind]
+
                 # Since we decoded starting with <start>,
                 # the targets are all words after <start>, up to <end>
                 targets = labels_sorted[:, 1:]
@@ -496,9 +512,10 @@ if __name__ == "__main__":
                     labels_all = np.concatenate((labels_all, labels), axis=0)
 
         # this function mixes the precision and recall
-        prec, recall, macro_f1, _ = precision_recall_fscore_support(preds_all,
-                                                                    labels_all,
-                                                                    average='macro')
+        prec, recall, _, _ = precision_recall_fscore_support(preds_all,
+                                                             labels_all,
+                                                             average='macro')
+        macro_f1 = 2 * prec * recall / (prec + recall)
         print "MACRO prec %.2f%%, recall %.2f%%, f1 %.2f%%" % (
             recall * 100, prec * 100, macro_f1 * 100)
 

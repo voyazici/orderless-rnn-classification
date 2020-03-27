@@ -65,9 +65,10 @@ def test(args, model, device, test_loader, threshold):
                 outputs = np.concatenate((outputs, output_arr),
                                          axis=0)
 
-    prec, recall, f1, _ = precision_recall_fscore_support(outputs,
-                                                          labels,
-                                                          average='macro')
+    prec, recall, _, _ = precision_recall_fscore_support(outputs,
+                                                         labels,
+                                                         average='macro')
+    f1 = 2 * prec * recall / (prec + recall)
     print('\nMACRO prec: {:.2f}, recall: {:.2f}, f1: {:.2f}\n'.format(
         100*recall, 100*prec, 100*f1))
     prec, recall, f1, _ = precision_recall_fscore_support(outputs,
@@ -81,14 +82,14 @@ def test(args, model, device, test_loader, threshold):
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
-    parser.add_argument('-batch_size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 64)')
+    parser.add_argument('-batch_size', type=int, default=32, metavar='N',
+                        help='input batch size for training (default: 32)')
     parser.add_argument('-epochs', type=int, default=30, metavar='N',
-                        help='number of epochs to train (default: 10)')
+                        help='number of epochs to train (default: 30)')
     parser.add_argument('-lr', type=float, default=0.01, metavar='LR',
                         help='learning rate (default: 0.01)')
-    parser.add_argument('-momentum', type=float, default=0.5, metavar='M',
-                        help='SGD momentum (default: 0.5)')
+    parser.add_argument('-momentum', type=float, default=0.9, metavar='M',
+                        help='SGD momentum (default: 0.9)')
     parser.add_argument('-log_interval', type=int, default=50, metavar='N',
                         help='how many batches to wait before logging training status')
     parser.add_argument('-threshold', type=float, default=0.5,
@@ -135,6 +136,8 @@ def main():
                              collate_fn=my_collate)
 
     model = Net().to(device)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
     if args.snapshot:
         model.load_state_dict(torch.load(args.snapshot))
         if args.test_model == False:
