@@ -40,7 +40,24 @@ categories = ['airplane', 'apple', 'backpack', 'banana', 'baseball bat',
               'surfboard', 'teddy bear', 'tennis racket', 'tie', 'toaster', 'toilet',
               'toothbrush', 'traffic light', 'train', 'truck', 'tv', 'umbrella', 'vase',
               'wine glass', 'zebra']
-
+categories_sorted_by_freq = ['person', 'chair', 'car', 'dining table', 'cup',
+                             'bottle', 'bowl', 'handbag', 'truck', 'backpack',
+                             'bench', 'book', 'cell phone', 'sink', 'tv', 'couch',
+                             'clock', 'knife', 'potted plant', 'dog', 'sports ball',
+                             'traffic light', 'cat', 'bus', 'umbrella', 'tie', 'bed',
+                             'fork', 'vase', 'skateboard', 'spoon', 'laptop',
+                             'train', 'motorcycle', 'tennis racket', 'surfboard',
+                             'toilet', 'bicycle', 'airplane', 'bird', 'skis', 'pizza',
+                             'remote', 'boat', 'cake', 'horse', 'oven', 'baseball glove',
+                             'baseball bat', 'giraffe', 'wine glass', 'refrigerator',
+                             'sandwich', 'suitcase', 'kite', 'banana', 'elephant',
+                             'frisbee', 'teddy bear', 'keyboard', 'cow', 'broccoli', 'zebra',
+                             'mouse', 'orange', 'stop sign', 'fire hydrant', 'carrot',
+                             'apple', 'snowboard', 'sheep', 'microwave', 'donut', 'hot dog',
+                             'toothbrush', 'scissors', 'bear', 'parking meter', 'toaster',
+                             'hair drier']
+categories_sorted_by_freq = dict((x, len(categories) - count)
+                                 for count, x in enumerate(categories_sorted_by_freq))
 category_dict_classification = dict((category, count) for count, category in enumerate(categories))
 category_dict_sequential = dict((category, count) for count, category in enumerate(categories))
 category_dict_sequential['<end>'] = len(categories)
@@ -50,7 +67,7 @@ category_dict_sequential_inv = dict((value, key)
                                     for key, value in category_dict_sequential.items())
 
 class COCOMultiLabel(Dataset):
-    def __init__(self, train, classification, image_path):
+    def __init__(self, train, classification, image_path, sort_by_freq=False):
         super(COCOMultiLabel, self).__init__()
         self.train = train
         if self.train == True:
@@ -67,7 +84,9 @@ class COCOMultiLabel(Dataset):
         assert classification in [True, False]
         self.classification = classification
         self.fns = self.coco_json.keys()
-
+        self.sort_by_freq = sort_by_freq
+        if self.sort_by_freq:
+            print 'Sorting by frequency'
 
     def __len__(self):
         return len(self.coco_json)
@@ -97,12 +116,19 @@ class COCOMultiLabel(Dataset):
             return None
 
         # labels
+        labels_freq_indexes = [categories_sorted_by_freq[x] for x in categories_batch]
         labels = []
         labels_classification = np.zeros(len(categories), dtype=np.float32)
         labels.append(category_dict_sequential['<start>'])
         for category in categories_batch:
             labels.append(category_dict_sequential[category])
             labels_classification[category_dict_classification[category]] = 1
+
+        if self.sort_by_freq:
+            labels_new = [category_dict_sequential['<start>']]
+            labels_new.extend([label
+                               for _, label in sorted(zip(labels_freq_indexes, labels[1:]), reverse=True)])
+            labels = labels_new[:]
 
         labels.append(category_dict_sequential['<end>'])
         for _ in range(self.max_length - len(categories_batch) - 1):

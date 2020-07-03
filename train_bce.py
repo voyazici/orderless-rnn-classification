@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from scipy.stats import logistic
 from sklearn.metrics import precision_recall_fscore_support
 from dataset import COCOMultiLabel
-from model import Net
+from model import Net, convert_weights
 from tqdm import tqdm
 import os
 from tensorboardX import SummaryWriter
@@ -139,7 +139,10 @@ def main():
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     if args.snapshot:
-        model.load_state_dict(torch.load(args.snapshot))
+        if isinstance(model, nn.DataParallel):
+            model.load_state_dict(torch.load(args.snapshot))
+        else:
+            model.load_state_dict(convert_weights(torch.load(args.snapshot)))
         if args.test_model == False:
             assert args.resume is not None
             resume = args.resume

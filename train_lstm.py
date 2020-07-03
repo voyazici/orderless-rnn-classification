@@ -141,32 +141,6 @@ def order_the_targets_pla(scores, targets, label_lengths_sorted):
     targets_newest = torch.LongTensor(targets_newest).to(device)
     return targets_newest
     
-def order_the_targets(scores, targets, label_lengths_sorted):
-    device = targets.device
-    scores = scores.data.cpu().numpy()
-    targets = targets.data.cpu().numpy()
-    targets_new = targets.copy()
-    N = scores.shape[0]
-    time_steps = scores.shape[1]
-    indexes = np.argmax(scores, axis=2)
-    changed_batch_indexes = []
-    for i in range(N):
-        common_indexes = set(targets[i][0:label_lengths_sorted[i]-1]).intersection(set(indexes[i]))
-        if common_indexes != set():
-            changed_batch_indexes.append(i)
-            for j in range(label_lengths_sorted[i] - 1):
-                if indexes[i][j] in common_indexes:
-                    if indexes[i][j] != targets_new[i][j].item():
-                        old_value = targets_new[i][j]
-                        new_value = indexes[i][j]
-                        new_value_index = np.where(targets_new[i] == new_value)[0][0]
-                        targets_new[i][j] = new_value
-                        targets_new[i][new_value_index] = old_value
-                    common_indexes.remove(indexes[i][j].item())
-
-    targets_new = torch.LongTensor(targets_new).to(device)
-    return targets_new
-
 def convert_to_array(scores, targets, target_lengths):
     scores = scores.data.cpu().numpy()
     targets = targets.data.cpu().numpy()
@@ -218,6 +192,10 @@ if __name__ == "__main__":
     parser.add_argument('-train_from_scratch', action='store_true', default=False)
     parser.add_argument('-encoder_weights', default=None,
                         help='weights from the encoder training')
+    parser.add_argument('-dropout', type=float, default=0.0)
+    parser.add_argument('-sort_by_freq', action='store_true')
+    parser.add_argument('-coeff', type=float, default=0.5)
+    parser.add_argument('-epochs_to_decrease_lr', type=int, default=1)
     args = parser.parse_args()
 
     save_path = args.save_path
@@ -242,14 +220,17 @@ if __name__ == "__main__":
     if test_model is True:
         assert args.snapshot is not None
     else:
-        assert args.order_free in ["pla", "mla"]
-
+        if args.sort_by_freq is False:
+            assert args.order_free in ["pla", "mla"]
+        else:
+            if args.order_free:
+                raise ValueError('Sort by freq and order_free are mutually exclusive.')
     resume = 0
     highest_f1 = 0
     epochs_without_imp = 0
     iterations = 0
     encoder = Encoder(encoder_weights=args.encoder_weights)
-    decoder = Decoder(args.hidden_size, args.embed_size, args.attention_size)
+    decoder = Decoder(args.hidden_size, args.embed_size, args.attention_size, args.dropout)
     encoder = encoder.to('cuda')
     decoder = decoder.to('cuda')
 
@@ -342,10 +323,12 @@ if __name__ == "__main__":
 
     dataset = COCOMultiLabel(train=True,
                              classification=False,
-                             image_path=args.image_path)
+                             image_path=args.image_path,
+                             sort_by_freq=args.sort_by_freq)
     dataset_val = COCOMultiLabel(train=False,
                                  classification=False,
-                                 image_path=args.image_path)
+                                 image_path=args.image_path,
+                                 sort_by_freq=args.sort_by_freq)
     dataloader = DataLoader(dataset,
                             batch_size=args.batch_size,
                             num_workers=args.num_workers,
@@ -429,8 +412,6 @@ if __name__ == "__main__":
                 elif args.order_free == 'mla':
                     targets = order_the_targets_mla(
                         scores, targets, label_lengths_sorted)   
-                else:
-                    raise NotImplementedError
 
                 scores, _ = pack_padded_sequence(
                     scores, label_lengths_sorted, batch_first=True)
@@ -551,8 +532,8 @@ if __name__ == "__main__":
                 epochs_without_imp += 1
                 print "Highest f1 score is still %.2f%%, epochs without imp. %d" % (
                     highest_f1*100, epochs_without_imp)
-                if epochs_without_imp == 3 and swa_params == {}:
-                    adjust_learning_rate(decoder_optimizer, 0.1)
+                if epochs_without_imp == args.epochs_to_decrease_lr and swa_params == {}:
+                    adjust_learning_rate(decoder_optimizer, args.coeff)
                     if finetune_encoder:
-                        adjust_learning_rate(encoder_optimizer, 0.1)
+                        adjust_learning_rate(encoder_optimizer, args.coeff)
                     epochs_without_imp = 0

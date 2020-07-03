@@ -72,7 +72,7 @@ class Attention(nn.Module):
         return attention_weighted_encoding, att
 
 class Decoder(nn.Module):
-    def __init__(self, hidden_size, embed_size, attention_size):
+    def __init__(self, hidden_size, embed_size, attention_size, dropout):
         super(Decoder, self).__init__()
         self.hidden_size = hidden_size
         self.embed_size = embed_size
@@ -94,6 +94,7 @@ class Decoder(nn.Module):
                                    self.encoder_dim)
         self.f_beta = nn.Linear(self.hidden_size, self.encoder_dim)
         self.sigmoid = nn.Sigmoid()
+        self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, encoder_out, fc_out, labels, label_lengths):
         label_lengths, sort_ind = label_lengths.sort(
@@ -131,10 +132,10 @@ class Decoder(nn.Module):
 
             h, c = self.lstm_cell(torch.cat([embeddings, attention_weighted_encoding],
                                             dim=1), (h, c))
-            preds = self.fc(h)
+            preds = self.fc(self.dropout(h))
             predictions[:, t, :] = preds
             next_word_idx = torch.max(preds, 1)[1]
-            embeddings = self.embedding(next_word_idx)
+            embeddings = self.dropout(self.embedding(next_word_idx))
         return predictions, labels, label_lengths
 
 class Encoder(nn.Module):
