@@ -285,7 +285,7 @@ if __name__ == "__main__":
                                                swa_params['lr_low'] * swa_coeff,
                                                swa_params['cycle_length'])
         decoder_swa = Decoder(args.hidden_size, args.embed_size,
-                              args.attention_size).to('cuda')
+                              args.attention_size, args.dropout).to('cuda')
         encoder_swa = Encoder().to('cuda')
         print "Encoder and decoder learning rates will be overwritten"
         if checkpoint:
